@@ -22,8 +22,8 @@ def capture_frames():
     cap.set(cv2.CAP_PROP_FPS, 30)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     
-    cap.set(cv2.CV_CAP_PROP_FRAME_WIDTH, 1920)
-    cap.set(cv22.CV_CAP_PROP_FRAME_HEIGHT, 1080)
+    
+    
 
 
     if not cap.isOpened():
