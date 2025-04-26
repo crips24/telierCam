@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Imprimantes 3d</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #f0f0f0;
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+
+    .video-container {
+      flex: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-right: 2px solid #FFB400;
+      box-shadow: 0 0 15px rgba(255,180,0,0.4);
+      background: #000;
+      position: relative;
+    }
+    .video-container img {
+      width: auto;
+      height: auto;
+      border-radius: 8px;
+    }
+    .video-container h1 {
+      color: #FFB400;
+      margin-bottom: 20px;
+    }
+    .video-container footer {
+      position: absolute;
+      bottom: 15px;
+      font-size: 12px;
+      color: #555;
+    }
+
+
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #222;
+      padding: 10px;
+    }
+    .viewer-count {
+      margin-bottom: 10px;
+      font-size: 0.9em;
+      color: #FFB400;
+    }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 5px;
+    }
+    .message {
+      margin-bottom: 8px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: #333;
+      animation: slideIn 0.3s ease-out;
+      word-wrap: break-word;
+    }
+    .message .user {
+      font-weight: bold;
+      color: #FFB400;
+      margin-right: 6px;
+    }
+
+    .message img {
+      display: block;
+      margin-top: 5px;
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: 4px;
+    }
+
+    .input-area {
+      display: flex;
+      margin-top: 10px;
+    }
+    .input-area input {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #444;
+      border-radius: 4px 0 0 4px;
+      background: #111;
+      color: #fff;
+    }
+    .input-area button {
+      padding: 6px 12px;
+      border: none;
+      background: #FFB400;
+      color: #111;
+      border-radius: 0 4px 4px 0;
+      cursor: pointer;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);     opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="video-container">
+    <h1>Imprimantes 3d</h1>
+    <img src="/video_feed" alt="Imprimantes 3d">
+    <footer>L'Atelier Strasbourg – 2025</footer>
+  </div>
+
+  <div class="chat-container">
+    <div class="viewer-count">
+      Viewers: <span id="viewerCount">0</span>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <input id="msgInput" placeholder="Type a message…" autocomplete="off" />
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.0/socket.io.min.js"></script>
+  <script>
+
+    const socket = io();
+
+    socket.on('viewer_count', data => {
+      document.getElementById('viewerCount').textContent = data.count;
+    });
+
+    socket.on('chat_message', data => {
+      const container = document.getElementById('messages');
+      const msgDiv = document.createElement('div');
+      msgDiv.classList.add('message');
+
+
+      const userSpan = document.createElement('span');
+      userSpan.classList.add('user');
+      userSpan.textContent = data.user + ': ';
+      msgDiv.appendChild(userSpan);
+
+
+      const text = data.msg;
+
+      const imgTagRegex = /<img\s+[^>]*src=(['"])(https?:\/\/[^'"]+\.(?:jpg|jpeg|png|gif))\1[^>]*>/gi;
+      let lastIndex = 0, match;
+      while ((match = imgTagRegex.exec(text)) !== null) {
+
+        if (match.index > lastIndex) {
+          msgDiv.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
+        }
+
+        const url = match[2];
+        const img = document.createElement('img');
+        img.src = url;
+        msgDiv.appendChild(img);
+        lastIndex = imgTagRegex.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        msgDiv.appendChild(document.createTextNode(text.substring(lastIndex)));
+      }
+
+      container.appendChild(msgDiv);
+      container.scrollTop = container.scrollHeight;
+    });
+
+    function sendMsg() {
+      const inp = document.getElementById('msgInput');
+      const txt = inp.value.trim();
+      if (!txt) return;
+      socket.emit('chat_message', { msg: txt });
+      inp.value = '';
+    }
+
+    document.getElementById('sendBtn').onclick = sendMsg;
+    document.getElementById('msgInput').addEventListener('keypress', e => {
+      if (e.key === 'Enter') sendMsg();
+    });
+  </script>
+</body>
+</html>
