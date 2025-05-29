@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel</title>
+  <style>
+    body { margin:0; background:#111; color:#f0f0f0; font-family:Arial,sans-serif; display:flex; flex-direction:column; align-items:center; padding:20px; }
+    input, button { margin:5px 0; padding:8px; border:1px solid #444; border-radius:4px; background:#222; color:#f0f0f0; width:200px; }
+    button { background:#FFB400; color:#111; cursor:pointer; }
+    #adminDiv { display:none; width:100%; max-width:600px; }
+    section { margin-top:20px; }
+    #feedList li { margin:5px 0; }
+    video { display:block; margin-top:10px; border:2px solid #FFB400; border-radius:4px; width:400px; height:300px; }
+  </style>
+</head>
+<body>
+  <div id="loginDiv">
+    <h1>Admin Login</h1>
+    <input id="pwd" type="password" placeholder="Enter password" />
+    <button id="loginBtn">Login</button>
+  </div>
+
+  <div id="adminDiv">
+    <h1>Admin Panel</h1>
+
+    <section id="createSection">
+      <h2>Create Camera Feed</h2>
+      <input id="camName" placeholder="Feed Name" />
+      <button id="createBtn">Create</button>
+      <video id="preview" autoplay muted playsinline style="display:none;"></video>
+      <button id="startBtn" style="display:none;">Start Sharing</button>
+    </section>
+
+    <section id="listSection">
+      <h2>Existing Feeds</h2>
+      <ul id="feedList"></ul>
+    </section>
+  </div>
+
+  <script>
+    const chatSocket = new WebSocket(
+      `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws_chat`
+    );
+    let pendingName = null, pendingFeedId = null;
+    let frameTimer = null;
+
+    chatSocket.onmessage = e => {
+      const d = JSON.parse(e.data);
+      switch(d.action) {
+        case 'login':
+          if (d.success) {
+            document.getElementById('loginDiv').style.display = 'none';
+            document.getElementById('adminDiv').style.display = 'block';
+          } else alert('Wrong password');
+          break;
+        case 'initial_feeds':
+          updateFeedList(d.feeds);
+          break;
+        case 'feed_created':
+          if (pendingName === d.name) {
+            pendingFeedId = d.feed_id;
+            showPreviewAndStream();
+          }
+          updateFeedList([...(window.currentFeeds||[]), {feed_id:d.feed_id, name:d.name}]);
+          break;
+        case 'feed_removed':
+          updateFeedList((window.currentFeeds||[]).filter(f=>f.feed_id!==d.feed_id));
+          break;
+      }
+    };
+
+    document.getElementById('loginBtn').onclick = () => {
+      chatSocket.send(JSON.stringify({action:'login', password: document.getElementById('pwd').value}));
+    };
+    document.getElementById('createBtn').onclick = () => {
+      const name = document.getElementById('camName').value.trim();
+      if (!name) return alert('Enter a name');
+      pendingName = name;
+      chatSocket.send(JSON.stringify({action:'create_feed', name}));
+    };
+
+    function updateFeedList(feeds) {
+      window.currentFeeds = feeds;
+      const ul = document.getElementById('feedList'); ul.innerHTML = '';
+      feeds.forEach(f => {
+        const li = document.createElement('li');
+        li.textContent = `${f.feed_id}: ${f.name} `;
+        const btn = document.createElement('button'); btn.textContent = 'Remove';
+        btn.onclick = () => { if(confirm('Remove this feed?')) chatSocket.send(JSON.stringify({action:'remove_feed', feed_id: f.feed_id})); };
+        li.appendChild(btn); ul.appendChild(li);
+      });
+    }
+
+    function showPreviewAndStream() {
+      const vid = document.getElementById('preview');
+      const btn = document.getElementById('startBtn');
+      vid.style.display = 'block';
+      btn.style.display = 'inline-block';
+
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator(); osc.frequency.value = 0.0001;
+      osc.connect(audioCtx.destination); osc.start();
+
+      navigator.mediaDevices.getUserMedia({video:true})
+        .then(stream => {
+          vid.srcObject = stream;
+          vid.onplaying = () => startStreaming();
+        })
+        .catch(err => console.error('Camera error:', err));
+    }
+
+    function startStreaming() {
+      if (frameTimer) return;
+      const ws = new WebSocket(
+        `${location.protocol==='https:'?'wss':'ws'}://${location.host}` +
+        `/ws_stream?role=broadcaster&feed_id=${pendingFeedId}`
+      );
+      const vid = document.getElementById('preview');
+      const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+      const WIDTH = 640, HEIGHT = 480; canvas.width = WIDTH; canvas.height = HEIGHT;
+
+      ws.onopen = () => {
+        frameTimer = setInterval(() => {
+          ctx.drawImage(vid, 0, 0, WIDTH, HEIGHT);
+          canvas.toBlob(b => {
+            b.arrayBuffer().then(buf => { if(ws.readyState===WebSocket.OPEN) ws.send(buf); });
+          }, 'image/webp', 0.8);
+        }, 33);
+        document.getElementById('startBtn').disabled = true;
+      };
+
+      ws.onclose = () => { clearInterval(frameTimer); frameTimer = null; };
+    }
+
+  </script>
+</body>
+</html>

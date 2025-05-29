@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Imprimantes 3D</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #f0f0f0;
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .video-container {
+      flex: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      border-right: 2px solid #FFB400;
+      box-shadow: 0 0 15px rgba(255, 180, 0, 0.4);
+      position: relative;
+      transition: all 0.3s ease;
+    }
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #222;
+      padding: 10px;
+    }
+
+    .video-container .grid {
+      display: grid;
+      grid-gap: 10px;
+      width: 100%;
+      height: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    .feed {
+      position: relative;
+      cursor: pointer;
+    }
+    .feed img {
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+      display: block;
+    }
+    .feed .label {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      color: #FFB400;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    .viewer-count {
+      margin-bottom: 10px;
+      font-size: 0.9em;
+      color: #FFB400;
+    }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 5px;
+    }
+    .message {
+      margin-bottom: 8px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: #333;
+      animation: slideIn 0.3s ease-out;
+      word-wrap: break-word;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .message .user {
+      font-weight: bold;
+      color: #FFB400;
+      margin-right: 6px;
+    }
+    .input-area {
+      display: flex;
+      margin-top: 10px;
+    }
+    .input-area input {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #444;
+      border-radius: 4px 0 0 4px;
+      background: #111;
+      color: #fff;
+    }
+    .input-area button {
+      padding: 6px 12px;
+      border: none;
+      background: #FFB400;
+      color: #111;
+      border-radius: 0 4px 4px 0;
+      cursor: pointer;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);   opacity: 1; }
+    }
+
+    .video-container.single-feed .feed:not(.fullscreen) {
+      display: none;
+    }
+    .video-container.single-feed .feed.fullscreen {
+      grid-column: 1 / -1 !important;
+      grid-row:    1 / -1 !important;
+      z-index: 10;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+        height: auto;
+      }
+      .video-container {
+        flex: none;
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: 2px solid #FFB400;
+      }
+      .chat-container {
+        flex: none;
+        width: 100%;
+        height: 40vh;
+        border-top: none;
+      }
+      .video-container .grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      }
+      .messages { font-size: 0.9em; }
+      .input-area input,
+      .input-area button { font-size: 1em; }
+    }
+  </style>
+</head>
+<body>
+  <div class="video-container">
+    <h1>Imprimantes 3D</h1>
+    <div id="videos" class="grid"></div>
+    <footer>L'Atelier Strasbourg – 2025</footer>
+  </div>
+
+  <div class="chat-container">
+    <div class="viewer-count">Viewers: <span id="viewerCount">0</span></div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <input id="msgInput" placeholder="Type a message…" autocomplete="off" />
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <script>
+    const chatSocket = new WebSocket(
+      `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws_chat`
+    );
+    let feeds = [];
+    const videosDiv = document.getElementById('videos');
+    const messagesDiv = document.getElementById('messages');
+    const viewerCountSpan = document.getElementById('viewerCount');
+    let streamSockets = {};
+
+    chatSocket.onmessage = e => {
+      const d = JSON.parse(e.data);
+      switch(d.action) {
+        case 'initial_feeds':
+          feeds = d.feeds;
+          rebuildGrid();
+          break;
+        case 'feed_created':
+          feeds.push({feed_id:d.feed_id, name:d.name});
+          rebuildGrid();
+          break;
+        case 'feed_removed':
+          feeds = feeds.filter(f=>f.feed_id!==d.feed_id);
+          rebuildGrid();
+          break;
+        case 'chat_history':
+          d.history.forEach(h=>addMessage(h.user,h.msg));
+          break;
+        case 'chat_message':
+          addMessage(d.entry.user, d.entry.msg);
+          break;
+        case 'viewer_count':
+          viewerCountSpan.textContent = d.count;
+          break;
+        case 'moderation':
+          addMessage('SYSTEM', d.type==='ban'?`Banned IP ${d.ip}`:'');
+          break;
+      }
+    };
+
+    function sendChat() {
+      const inp = document.getElementById('msgInput');
+      const txt = inp.value.trim();
+      if (!txt) return;
+      chatSocket.send(JSON.stringify({action:'chat', msg:txt}));
+      inp.value = '';
+    }
+    document.getElementById('sendBtn').onclick = sendChat;
+    document.getElementById('msgInput').addEventListener('keypress', e => {
+      if (e.key==='Enter') sendChat();
+    });
+
+    function addMessage(user, msg) {
+      const m = document.createElement('div');
+      m.classList.add('message');
+      m.innerHTML = `<span class="user">${user}:</span> ${msg}`;
+      messagesDiv.appendChild(m);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function rebuildGrid() {
+      for (let id in streamSockets) streamSockets[id].close();
+      streamSockets = {};
+      videosDiv.innerHTML = '';
+
+      const n = Math.ceil(Math.sqrt(feeds.length));
+      videosDiv.style.gridTemplateColumns = `repeat(${n},1fr)`;
+
+      const vc = document.querySelector('.video-container');
+
+      feeds.forEach(f => {
+        const div = document.createElement('div');
+        div.classList.add('feed');
+
+        const label = document.createElement('div');
+        label.classList.add('label');
+        label.textContent = f.name;
+        div.appendChild(label);
+
+        const img = document.createElement('img');
+        img.id = `stream-${f.feed_id}`;
+        div.appendChild(img);
+        videosDiv.appendChild(div);
+
+        const ws = new WebSocket(
+          `${location.protocol==='https:'?'wss':'ws'}://${location.host}` +
+          `/ws_stream?role=viewer&feed_id=${f.feed_id}`
+        );
+        ws.binaryType = 'arraybuffer';
+        ws.onmessage = ev => {
+          const blob = new Blob([ev.data],{type:'image/webp'});
+          const url  = URL.createObjectURL(blob);
+          img.src = url;
+          setTimeout(()=>URL.revokeObjectURL(url),1000);
+        };
+        streamSockets[f.feed_id] = ws;
+
+        div.addEventListener('click', () => {
+          const prev = vc.querySelector('.feed.fullscreen');
+          if (prev && prev !== div) prev.classList.remove('fullscreen');
+          const nowFs = div.classList.toggle('fullscreen');
+          vc.classList.toggle('single-feed', nowFs);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
