@@ -79,6 +79,7 @@ async def ws_stream(request):
 
 @routes.get('/ws_chat')
 async def ws_chat(request):
+    global feed_counter
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     ip = request.remote
