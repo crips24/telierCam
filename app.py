@@ -56,18 +56,40 @@ async def ws_stream(request):
     entry = feeds[fid]
 
     if role == 'broadcaster':
+        # Kick out the old broadcaster if one exists
         old = entry.get('broadcaster')
         if old:
-            await old.close()
+            try:
+                await old.close()
+            except:
+                pass
+
         entry['broadcaster'] = ws
 
-        async for msg in ws:
-            if msg.type == WSMsgType.BINARY:
-                for v in list(entry['viewers']):
-                    if not v.closed:
-                        await v.send_bytes(msg.data)
-        entry['broadcaster'] = None
+        try:
+            async for msg in ws:
+                if msg.type == WSMsgType.BINARY:
+                    # Safely send this frame to every viewer
+                    for v in list(entry['viewers']):
+                        if v.closed:
+                            entry['viewers'].discard(v)
+                            continue
+                        try:
+                            await v.send_bytes(msg.data)
+                        except Exception:
+                            # That viewer is dead; close and remove
+                            try:
+                                await v.close()
+                            except:
+                                pass
+                            entry['viewers'].discard(v)
+            # end async for
+        finally:
+            # Broadcaster is gone—clear the slot
+            entry['broadcaster'] = None
+
     else:
+        # Role = viewer
         entry['viewers'].add(ws)
         try:
             async for _ in ws:
@@ -76,6 +98,7 @@ async def ws_stream(request):
             entry['viewers'].discard(ws)
 
     return ws
+
 
 @routes.get('/ws_chat')
 async def ws_chat(request):
